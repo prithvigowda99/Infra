@@ -47,7 +47,7 @@ AWS Account (us-east-1)
 │
 ├── VPC  (10.0.0.0/16)
 │   ├── Public Subnets        10.0.1.0/24  (us-east-1a)  ]  NAT Gateway,
-│   │                         10.0.2.0/24  (us-east-1b)  ]  NLB, Ingress
+│   │                         10.0.2.0/24  (us-east-1b)  ]  ALB, Ingress
 │   ├── Private EKS Subnets   10.0.3.0/24  (us-east-1a)  ]  EKS worker
 │   │                         10.0.4.0/24  (us-east-1b)  ]  nodes (private)
 │   └── Private RDS Subnets   10.0.5.0/24  (us-east-1a)  ]  RDS PostgreSQL
@@ -87,11 +87,15 @@ AWS Account (us-east-1)
 │   ├── EKS Cluster Role          (allows EKS control plane to manage AWS resources)
 │   ├── EKS Node Group Role       (allows worker nodes to pull from ECR, join cluster)
 │   │
-│   ├── GitHub Actions OIDC Role  (pharma-dev-gitlab-runner-role)
-│   │   ├── Trust policy : repo zen-pharma-frontend and zen-pharma-backend only
+│   ├── GitHub Actions OIDC Role  (pharma-dev-github-actions-role)
+│   │   ├── Trust policy : repo zen-pharma-frontend, zen-pharma-backend, zen-pharma-backend-lab1 only
 │   │   └── Permissions  : ECR push/pull, EKS describe
 │   │   └── How it works : GitHub OIDC token -> AWS STS -> short-lived credentials
 │   │                      No AWS_ACCESS_KEY_ID stored in GitHub
+│   │
+│   ├── ALB Controller IRSA Role  (pharma-dev-alb-controller-role)
+│   │   ├── Trust policy : EKS service account kube-system/aws-load-balancer-controller
+│   │   └── Permissions  : elasticloadbalancing:*, ec2:Describe*, ec2 SG mgmt (creates/manages ALBs from Ingress)
 │   │
 │   ├── ESO IRSA Role             (pharma-dev-eso-role)
 │   │   ├── Trust policy : EKS service account external-secrets/external-secrets
@@ -150,7 +154,7 @@ for this cluster, not a hardcoded ARN.
 Internet
     |
     v
-AWS Network Load Balancer  (created by NGINX Ingress Controller Helm chart)
+AWS Application Load Balancer  (created per-Ingress by the AWS Load Balancer Controller)
     |  routes by URL path
     |-- /          -->  pharma-ui       (React, port 80)
     |-- /api/*     -->  api-gateway     (port 8080)
@@ -216,7 +220,7 @@ PR reviewed and merged to main
 Infrastructure updated in AWS
     |
     v
-EKS cluster is ready for Stage 2 (install NGINX Ingress, ArgoCD, ESO)
+EKS cluster is ready for Stage 2 (install AWS Load Balancer Controller, ArgoCD, ESO)
 ```
 
 ---
@@ -225,7 +229,7 @@ EKS cluster is ready for Stage 2 (install NGINX Ingress, ArgoCD, ESO)
 
 | Decision | Why |
 |---|---|
-| Worker nodes in private subnets | Nodes not reachable from internet; only NLB is public |
+| Worker nodes in private subnets | Nodes not reachable from internet; only the ALB is public |
 | RDS in private subnets | Database never exposed to internet; only EKS nodes can connect (port 5432 via SG rule) |
 | No static AWS keys in GitHub CI | GitHub Actions uses OIDC; credentials are short-lived (1 hour) and scoped to specific repos |
 | IRSA for pods | Pods never hold AWS credentials; they exchange a projected K8s token for short-lived STS credentials |

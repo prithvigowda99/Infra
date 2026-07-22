@@ -30,13 +30,19 @@ locals {
   # GitHub tightened OIDC sub claims on 2026-07-15: repos created after that date (or
   # opted in) mint tokens with immutable owner/repo IDs instead of the mutable name,
   # e.g. repo:org@<org_id>/repo@<repo_id>:ref:refs/heads/<branch>. Mutable-name subs
-  # silently stop matching, so the trust policy must key off IDs, not names.
+  # silently stop matching, so ideally the trust policy keys off IDs, not names.
   # https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws
+  #
+  # Immutable subject claims are opt-in per repo/org; DPP-2026 hasn't enabled it yet,
+  # so GitHub still mints tokens with the legacy "org/repo" (no @id) sub claim. Both
+  # formats are listed so this keeps working whenever DPP-2026 does opt in.
   github_oidc_subs = flatten([
-    for repo_name, repo_id in var.github_repo_ids : [
-      for branch in ["main", "develop"] :
-      "repo:${var.github_org}@${var.github_org_id}/${repo_name}@${repo_id}:ref:refs/heads/${branch}"
-    ]
+    for repo_name, repo_id in var.github_repo_ids : flatten([
+      for branch in ["main", "develop"] : [
+        "repo:${var.github_org}@${var.github_org_id}/${repo_name}@${repo_id}:ref:refs/heads/${branch}",
+        "repo:${var.github_org}/${repo_name}:ref:refs/heads/${branch}",
+      ]
+    ])
   ])
 }
 

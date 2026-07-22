@@ -26,6 +26,20 @@ resource "aws_iam_openid_connect_provider" "github_actions" {
   }
 }
 
+locals {
+  # GitHub tightened OIDC sub claims on 2026-07-15: repos created after that date (or
+  # opted in) mint tokens with immutable owner/repo IDs instead of the mutable name,
+  # e.g. repo:org@<org_id>/repo@<repo_id>:ref:refs/heads/<branch>. Mutable-name subs
+  # silently stop matching, so the trust policy must key off IDs, not names.
+  # https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws
+  github_oidc_subs = flatten([
+    for repo_name, repo_id in var.github_repo_ids : [
+      for branch in ["main", "develop"] :
+      "repo:${var.github_org}@${var.github_org_id}/${repo_name}@${repo_id}:ref:refs/heads/${branch}"
+    ]
+  ])
+}
+
 data "aws_iam_policy_document" "github_actions_assume_role" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -45,12 +59,7 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values = [
-        "repo:${var.github_org}/zen-pharma-frontend:ref:refs/heads/main",
-        "repo:${var.github_org}/zen-pharma-frontend:ref:refs/heads/develop",
-        "repo:${var.github_org}/zen-pharma-backend:ref:refs/heads/main",
-        "repo:${var.github_org}/zen-pharma-backend:ref:refs/heads/develop",
-      ]
+      values   = local.github_oidc_subs
     }
   }
 }

@@ -439,6 +439,47 @@ variable "github_org" {
 
 Do the same in `envs/qa/variables.tf` and `envs/prod/variables.tf`.
 
+#### GitHub's immutable OIDC `sub` claims (post 2026-07-15)
+
+GitHub [tightened OIDC token security on 2026-07-15](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws):
+repositories created after that date (or opted in to immutable subject claims) mint
+tokens whose `sub` claim embeds the numeric owner and repository IDs instead of the
+mutable org/repo name — `repo:org@<org_id>/repo@<repo_id>:ref:refs/heads/<branch>`. The
+AWS trust policy in `modules/iam/github-actions-oidc.tf` matches on this immutable
+format, so `github_org_id` and `github_repo_ids` must be set to **your** fork's actual
+numeric IDs — the trust policy will silently reject every workflow run otherwise.
+
+Fetch them from the GitHub REST API:
+
+```bash
+# Org/owner ID
+curl -s https://api.github.com/orgs/YOUR-GITHUB-USERNAME | jq .id
+
+# Repo IDs (one per repo)
+curl -s https://api.github.com/repos/YOUR-GITHUB-USERNAME/zen-pharma-frontend | jq .id
+curl -s https://api.github.com/repos/YOUR-GITHUB-USERNAME/zen-pharma-backend | jq .id
+curl -s https://api.github.com/repos/YOUR-GITHUB-USERNAME/zen-pharma-backend-lab1 | jq .id
+```
+
+If your account is a user (not an org), use `https://api.github.com/users/YOUR-GITHUB-USERNAME`
+instead of `/orgs/...`.
+
+Then update the defaults in `envs/dev/variables.tf`:
+
+```hcl
+variable "github_org_id" {
+  default = "YOUR_ORG_ID"          # ← from /orgs/<org> or /users/<user>
+}
+
+variable "github_repo_ids" {
+  default = {
+    "zen-pharma-frontend"     = "YOUR_FRONTEND_REPO_ID"
+    "zen-pharma-backend"      = "YOUR_BACKEND_REPO_ID"
+    "zen-pharma-backend-lab1" = "YOUR_BACKEND_LAB1_REPO_ID"
+  }
+}
+```
+
 ### 7.3 Update the GitHub Actions Workflow
 
 In `.github/workflows/terraform.yml`, update the `github_org` value:
@@ -687,7 +728,7 @@ All 5 repositories have:
 
 ### 12.5 GitHub Actions OIDC
 
-The IAM module creates a GitHub Actions OIDC role that allows CI/CD pipelines in `zen-pharma-frontend` and `zen-pharma-backend` to push images to ECR **without storing AWS credentials in GitHub Secrets**.
+The IAM module creates a GitHub Actions OIDC role that allows CI/CD pipelines in `zen-pharma-frontend`, `zen-pharma-backend`, and `zen-pharma-backend-lab1` to push images to ECR **without storing AWS credentials in GitHub Secrets**.
 
 How it works:
 1. GitHub mints a short-lived OIDC token per workflow run
@@ -696,8 +737,10 @@ How it works:
 4. CI uses these credentials to push images to ECR
 
 The role is restricted to:
-- Only `YOUR-GITHUB-USERNAME/zen-pharma-frontend` and `YOUR-GITHUB-USERNAME/zen-pharma-backend` repos
+- Only `YOUR-GITHUB-USERNAME/zen-pharma-frontend`, `YOUR-GITHUB-USERNAME/zen-pharma-backend`, and `YOUR-GITHUB-USERNAME/zen-pharma-backend-lab1` repos
 - Only `main` and `develop` branches
+- The exact numeric owner/repo IDs (`github_org_id` / `github_repo_ids`), per GitHub's
+  post-2026-07-15 immutable OIDC `sub` claim format — see [7.2](#72-update-github-organisation-variable)
 
 ---
 
